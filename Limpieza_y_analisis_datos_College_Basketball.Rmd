@@ -1,0 +1,266 @@
+---
+title: "Limpieza y analisis datos College Basketball"
+author: "Javier Cañón Álvarez"
+date: '`r format(Sys.Date(),"7 de Enero de 2020")`'
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(car)
+```
+
+# Descripción del Dataset
+
+Este Dataset esta formado por un conjunto de estadísticas de la liga universitaria de Estados Unidos. Por equipo y año se especifican datos como partidos ganados, perdidos, puntos, rebotes, etc.
+
+La pregunta que nos planteamos es si existe una gran diferencia entre las estadísticas de los equipos ganadores y los que no.
+
+
+# Integración y selección de los datos
+
+En este punto integraremos los datos existentes separados por años en un solo conjunto. Luego haremos una selección si procede de las variables que más nos interesen.
+
+Procedemos a cargar los ficheros en formato CSV que tiene una separación de campos mediante coma(,):
+
+```{r chunck1}
+# utilizando la función read.csv
+data15 <- read.csv("cbb15.csv")
+data16 <- read.csv("cbb16.csv")
+data17 <- read.csv("cbb17.csv")
+data18 <- read.csv("cbb18.csv")
+data19 <- read.csv("cbb19.csv")
+
+# mostramos la cabecera y estructuctura de uno de los años para comprobar que está bien
+head(data17)
+str(data17)
+```
+
+Para proceder a la integración añadimos una columna a cada dataset con el año correspondiente y luego juntamos todos los años.
+
+```{r chunck2}
+# añadimos columna con el año
+data15["YEAR"] <- 2015
+data16["YEAR"] <- 2016
+data17["YEAR"] <- 2017
+data18["YEAR"] <- 2018
+data19["YEAR"] <- 2019
+# juntamos todos los años
+data_tot <- rbind(data15, data16, data17, data18, data19)
+```
+
+```{r chunck3}
+attach(data_tot)
+```
+
+Ahora efectuamos la selección únicamente de las variables que nos interesan.
+
+```{r chunck4}
+#seleccionamos las variables que nos interesan
+data_tot <- select(data_tot,TEAM,G,W,EFG_O,TOR,TORD,ORB,DRB,FTR,X2P_O,X3P_O,POSTSEASON,YEAR)
+tail(data_tot)
+```
+
+
+# Limpieza de los datos
+
+## Valores nulos o vacíos
+
+Se examinan las diferentes columnas para comprobar si existen valores nulos o elementos vacíos.
+
+```{r chunck5}
+na_count <-sapply(data_tot, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+```
+
+Como podemos ver, solo nos aparecen elementos nulos en las columnas de POSTSEASON y SEED. Éstas nos indican la ronda donde un equipo fue eliminado en la elemininatoria final del campeonato. En caso de que sean nulos, sifnifica que no llegaron a las eliminatorias finales.
+
+Sustituimos los NA por NOT PLAYED.
+
+```{r chunck6}
+data_tot$POSTSEASON <- as.character(data_tot$POSTSEASON)
+data_tot[is.na(POSTSEASON),"POSTSEASON"] <- "NOT PLAYED"
+data_tot$POSTSEASON <- as.factor(data_tot$POSTSEASON)
+levels(data_tot$POSTSEASON)
+```
+
+
+## Valores extremos
+
+Ahora mediante diagramas de cajas veremos a ver si existen valores extremos que nos puedan llevar a errores posteriormente.
+
+```{r chunck7}
+boxplot(select(data_tot,-TEAM,-POSTSEASON,-YEAR))
+```
+
+A la vista de los valores obtenidos, no veo que los marcados en las gráficas de caja como valores extremos, así lo sean. Por tanto queda descartado que sean errorres del dataset y por tanto son perfectamente utilizables.
+
+
+# ANÁLISIS DE LOS DATOS
+
+## Selección de grupos de datos
+
+Para ver si los equipos más ganadores han tenido las mejores estadísticas, vamos a dividir el dataset en dos grupos: los que han llegado a las rondas finales y los que no.
+
+```{r chunck8}
+#añadimos una columna que diferencie entre finalistas y no finalistas
+data_tot["CATEGORIA"] <- "cat"
+data_tot[data_tot$POSTSEASON == "NOT PLAYED", "CATEGORIA"] <- "NO FINALISTA"
+data_tot[data_tot$POSTSEASON != "NOT PLAYED", "CATEGORIA"] <- "FINALISTA"
+#eliminamos la variable POSTSEASON
+data_tot$CATEGORIA <- as.factor(data_tot$CATEGORIA)
+data_tot <- select(data_tot, -POSTSEASON)
+head(data_tot)
+```
+
+De esta forma hemos diferenciado entre los equipos finalistas y no finalistas durante los últimos 5 años.
+
+
+## Comprobación de la normalidad
+
+Para la comprobación de la normalidad utilizaremos el test de Shapiro-Wilk. Asumiremos como hipótesis nula que la población está distribuida normalmente.
+
+```{r chunck9}
+shapiro.test(data_tot$W)
+shapiro.test(data_tot$EFG_O)
+shapiro.test(data_tot$TOR)
+shapiro.test(data_tot$TORD)
+shapiro.test(data_tot$ORB)
+shapiro.test(data_tot$DRB)
+shapiro.test(data_tot$FTR)
+shapiro.test(data_tot$X2P_O)
+shapiro.test(data_tot$X3P_O)
+```
+
+Observando los p-valores se puede decir que solo 4 de las 9 variables siguen una distribución normal. No obstante, por el teorema del límite central, y como las muestras son de gran tamaño (+30 elementos), podemos considerar que toda variable sigue una distribución normal de media 0 y desviación 1.
+
+También podemos comprobar la heterocedasticidad mediante el test de Levene.
+
+```{r chunck10}
+leveneTest(data_tot$W ~ data_tot$CATEGORIA)
+leveneTest(data_tot$EFG_O ~ data_tot$CATEGORIA)
+leveneTest(data_tot$TOR ~ data_tot$CATEGORIA)
+leveneTest(data_tot$TORD ~ data_tot$CATEGORIA)
+leveneTest(data_tot$ORB ~ data_tot$CATEGORIA)
+leveneTest(data_tot$DRB ~ data_tot$CATEGORIA)
+leveneTest(data_tot$FTR ~ data_tot$CATEGORIA)
+leveneTest(data_tot$X2P_O ~ data_tot$CATEGORIA)
+leveneTest(data_tot$X3P_O ~ data_tot$CATEGORIA)
+```
+
+Viendo los p-valores, la mayoría son mayores que 0.05 por lo que podemos afirmar igualdad de varianzas entre los grupos comparados: Finalistas y no finalistas.
+
+
+## Aplicación de pruebas estadísticas
+
+### Contraste de hipótesis
+
+En este primer estudio vamos a comprobar si existe diferencia entre las estadísticas registradas de los equipos "Finalistas" y los "no finalistas". Para ello vamos a realizar un contraste de hipótesis con algunas variables del dataset.
+
+Planteamos la hipótesis nula y la alternativa:
+
+- H0: stat(equipos ganadores) = stat(equipos perdedores)
+- H1: stat(equipos ganadores) > stat(equipos perdedores)
+
+donde "stat" será: EFG_O (Porcentaje de acierto en tiros de campo), FTR (Tiros libres), X3P_O (Porcentaje de acierto en triples)
+
+```{r chunck11}
+#aplicando la prueba t-Student para las 3 variables de estudio
+t.test(EFG_O ~ CATEGORIA, alternative = "greater", conf.level = 0.95, var.equal = TRUE, data = data_tot)
+
+t.test(FTR ~ CATEGORIA, alternative = "greater", conf.level = 0.95, var.equal = TRUE, data = data_tot)
+
+t.test(X3P_O ~ CATEGORIA, alternative = "greater", conf.level = 0.95, var.equal = TRUE, data = data_tot)
+```
+
+Como podemos ver, los p-valores obtenidos son menores al nivel de significación fijado y por tanto se rechaza la hipótesis nula.
+
+Como era de esperar, los equipos finalistas tienen mejores porcentajes de tiro en general, tiros libres y tiros de 2 puntos.
+
+
+## Correlación
+
+Mediante correlación vamos identificar si hay variables claves que influyan en ganar partidos.
+
+Analizaremos la correlación de partidos ganados con: rebotes ofensivos y porcentaje de tiros de 2.
+
+```{r chunck12}
+#con cor.test podemos ver la relación entre pares de variables
+cor.test(data_tot$W, data_tot$ORB)
+cor.test(data_tot$W, data_tot$X2P_O)
+```
+
+Podemos ver como influye más el porcentaje de acierto en tiros de 2 que los rebotes ofensivos cuando se gana un partido.
+
+
+# Representación de resultados
+
+Mediante un diagrama de barras podemos representar las estadísticas diferenciando entre equipos Finalistas y No Finalistas.
+
+Primeramente creamos los datos medios.
+
+```{r chunck13}
+mean_stats <- data_tot %>%
+  group_by(CATEGORIA) %>%
+  summarise(EFG_O_mean = mean(EFG_O),
+            DRB_mean = mean(DRB),
+            FTR_mean = mean(FTR),
+            X2P_O_mean = mean(X2P_O),
+            X3P_O_mean = mean(X3P_O))
+
+#mostramos tabla
+mean_stats
+```
+
+Y ahora representamos.
+
+```{r chunck14}
+barplot(mean_stats$EFG_O_mean, names=mean_stats$CATEGORIA, main = "Porcentaje de acierto de tiro")
+
+barplot(mean_stats$DRB_mean, names=mean_stats$CATEGORIA, main = "Rebotes defensivos")
+
+barplot(mean_stats$FTR_mean, names=mean_stats$CATEGORIA, main = "Porcentaje de acierto de tiros libres")
+
+barplot(mean_stats$X2P_O_mean, names=mean_stats$CATEGORIA, main = "Porcentaje de tiros de 2 puntos")
+
+barplot(mean_stats$X3P_O_mean, names=mean_stats$CATEGORIA, main = "Porcentaje de tiros de 3 puntos")
+```
+
+Vemos como las estadísticas normalmente favorecen a los equipos finalistas que es lo que estábamos buscando.
+
+
+# Resolución del problema
+
+Tras los análisis hechos hemos llegado a una conclusión que apriori era bastante lógica. Los equipos que han llegado a las rondas finales del campeonato de la liga universitaria de EEUU tienen mejores estadísticas de tiro, rebotes, porcentajes de acierto, etc.
+
+En el baloncesto actual las estadísticas y el BIG DATA de las estadísticas han adquirido una importancia vital en la política de fichajes de los diferentes equipos. Análisis como este (más exhaustivos) se llevan a cabo para poder mejorar dentro de los propios equipos.
+
+
+# Código
+
+```{r chunck15}
+write.csv(data_tot ,"C:\\Users\\JAVIER PC\\Documents\\cbb_final.csv", row.names = FALSE)
+```
+
+
+# Contribuciones
+
+- Investigación previa: Javier Cañón Álvarez
+- Redacción de las respuestas: Javier Cañón Álvarez
+- Desarrollo de código: Javier Cañón Álvarez
+
+
